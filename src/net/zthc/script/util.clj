@@ -1,4 +1,4 @@
-(ns zthc-script.util
+(ns net.zthc.script.util
   (:import (java.util Date))
   (:require [clojure.string :refer [upper-case lower-case]]))
 

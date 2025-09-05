@@ -1,7 +1,7 @@
-(ns zthc-script.core
+(ns net.zthc.script.core
   (:require
     ;[quil.core :as q]
-    [zthc-script.util :as util]
+    [net.zthc.script.util :as util]
     [clojure.tools.nrepl.server :refer [start-server stop-server]]
     [clojure.tools.nrepl.misc :refer [response-for]]
     [clojure.tools.nrepl.transport :as t])

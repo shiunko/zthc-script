@@ -1,0 +1,3 @@
+[tools]
+clojure = "latest"
+leiningen = "latest"

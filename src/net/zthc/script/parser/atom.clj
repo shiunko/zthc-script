@@ -1,4 +1,4 @@
-(ns zthc-script.parser.atom)
+(ns net.zthc.script.parser.atom)
 
 (def function (atom {}))
 
