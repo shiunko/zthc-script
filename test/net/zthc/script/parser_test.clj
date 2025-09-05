@@ -115,4 +115,36 @@
     (let [result (parser/parse-statement "@调试输出(\"test\")")]
       (is (= :function-call (:type result))))))
 
+(deftest test-parse-return
+  (testing "返回语句解析"
+    ;; 有参数的返回语句
+    (let [result (parser/parse-return "返回 123;")]
+      (is (= :return (:type result)))
+      (is (= :number (:type (:value result))))
+      (is (= 123 (:value (:value result)))))
+    
+    ;; 有参数的返回语句（字符串）
+    (let [result (parser/parse-return "返回 \"hello\";")]
+      (is (= :return (:type result)))
+      (is (= :string (:type (:value result))))
+      (is (= "hello" (:value (:value result)))))
+    
+    ;; 有参数的返回语句（函数调用）
+    (let [result (parser/parse-return "返回 @加(1, 2);")]
+      (is (= :return (:type result)))
+      (is (= :function-call (:type (:value result))))
+      (is (= "加" (:name (:value result)))))
+    
+    ;; 无参数的返回语句
+    (let [result (parser/parse-return "返回;")]
+      (is (= :return (:type result)))
+      (is (nil? (:value result))))
+    
+    ;; 在parse-statement中测试返回语句
+    (let [result (parser/parse-statement "返回 42;")]
+      (is (= :return (:type result))))
+    
+    (let [result (parser/parse-statement "返回;")]
+      (is (= :return (:type result))))))
+
 (run-tests)

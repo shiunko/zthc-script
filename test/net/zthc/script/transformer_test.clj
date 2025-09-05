@@ -114,4 +114,72 @@
       (is (= 1 (:original-count validation)))
       (is (= 1 (:transformed-count validation))))))
 
+(deftest test-transform-return
+  (testing "转换返回语句"
+    ;; 有参数的返回语句
+    (let [return-stmt {:type :return :value {:type :number :value 42}}
+          result (transformer/transform-return return-stmt)]
+      (is (= '(返回 42) result)))
+    
+    ;; 有参数的返回语句（字符串）
+    (let [return-stmt {:type :return :value {:type :string :value "hello"}}
+          result (transformer/transform-return return-stmt)]
+      (is (= '(返回 "hello") result)))
+    
+    ;; 有参数的返回语句（函数调用）
+    (let [return-stmt {:type :return 
+                       :value {:type :function-call 
+                               :name "加" 
+                               :args [{:type :number :value 1} 
+                                      {:type :number :value 2}]}}
+          result (transformer/transform-return return-stmt)]
+      (is (= '(返回 (加 1 2)) result)))
+    
+    ;; 无参数的返回语句
+    (let [return-stmt {:type :return :value nil}
+          result (transformer/transform-return return-stmt)]
+      (is (= '(返回) result)))))
+
+(deftest test-transform-ast-with-return
+  (testing "转换包含返回语句的 AST 节点"
+    ;; 返回语句
+    (let [ast {:type :return :value {:type :number :value 123}}
+          result (transformer/transform-ast ast)]
+      (is (= '(返回 123) result)))
+    
+    ;; 无参数返回语句
+    (let [ast {:type :return :value nil}
+          result (transformer/transform-ast ast)]
+      (is (= '(返回) result)))))
+
+(deftest test-early-return-detection
+  (testing "早期返回检测"
+    ;; 包含早期返回的函数体
+    (let [body-forms ['(调试输出 "test") '(返回 42) '(调试输出 "never reached")]]
+      (is (transformer/has-early-return? body-forms)))
+    
+    ;; 不包含早期返回的函数体
+    (let [body-forms ['(调试输出 "test") '(调试输出 "end") '(返回 42)]]
+      (is (not (transformer/has-early-return? body-forms))))
+    
+    ;; 空函数体
+    (let [body-forms []]
+      (is (not (transformer/has-early-return? body-forms))))))
+
+(deftest test-function-body-optimization
+  (testing "函数体优化"
+    ;; 优化普通函数体（最后一个返回语句）
+    (let [body-forms ['(调试输出 "test") '(返回 42)]
+          optimized (transformer/optimize-function-body body-forms)]
+      (is (= ['(调试输出 "test") 42] optimized)))
+    
+    ;; 优化无返回语句的函数体
+    (let [body-forms ['(调试输出 "test") '(调试输出 "end")]
+          optimized (transformer/optimize-function-body body-forms)]
+      (is (= body-forms optimized)))
+    
+    ;; 优化空函数体
+    (let [body-forms []]
+      (is (= [] (transformer/optimize-function-body body-forms))))))
+
 (run-tests)

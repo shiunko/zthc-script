@@ -137,55 +137,119 @@
       :else
       (parse-identifier expr-str))))
 
+(defn remove-comments
+  "移除代码中的注释"
+  [code]
+  (let [lines (str/split-lines code)]
+    (->> lines
+         (map (fn [line]
+                (let [trimmed (str/trim line)]
+                  (cond
+                    ;; C风格注释 //
+                    (str/starts-with? trimmed "//")
+                    ""
+                    ;; Clojure风格注释 ;;
+                    (str/starts-with? trimmed ";;")
+                    ""
+                    ;; 行内C风格注释，保留注释前的代码
+                    (str/includes? line "//")
+                    (let [comment-idx (str/index-of line "//")]
+                      (str/trim (subs line 0 comment-idx)))
+                    ;; 行内Clojure风格注释，保留注释前的代码
+                    (str/includes? line ";;")
+                    (let [comment-idx (str/index-of line ";;")]
+                      (str/trim (subs line 0 comment-idx)))
+                    ;; 中文注释符号（兼容性）
+                    (re-matches #"^\s*[注释|备注|说明].*" trimmed)
+                    ""
+                    :else
+                    line))))
+         (str/join "\n"))))
+
 (defn split-statements
   "智能分割语句，考虑花括号内的分号"
   [code]
-  (loop [chars (seq code)
-         current-stmt ""
-         statements []
-         brace-depth 0
-         in-quotes false
-         quote-char nil]
-    (if (empty? chars)
-      (if (not (empty? (str/trim current-stmt)))
-        (conj statements (str/trim current-stmt))
-        statements)
-      (let [c (first chars)
-            rest-chars (rest chars)]
-        (cond
-          ;; 处理引号
-          (and (not in-quotes) (contains? #{\' \" \「 \\} c))
-          (recur rest-chars (str current-stmt c) statements brace-depth true c)
+  ;; 首先移除注释
+  (let [code-without-comments (remove-comments code)]
+    (loop [chars (seq code-without-comments)
+           current-stmt ""
+           statements []
+           brace-depth 0
+           in-quotes false
+           quote-char nil]
+      (if (empty? chars)
+        (if (not (empty? (str/trim current-stmt)))
+          (conj statements (str/trim current-stmt))
+          statements)
+        (let [c (first chars)
+              rest-chars (rest chars)]
+          (cond
+            ;; 处理引号
+            (and (not in-quotes) (contains? #{\' \" \「 \\} c))
+            (recur rest-chars (str current-stmt c) statements brace-depth true c)
 
-          (and in-quotes (= c quote-char))
-          (recur rest-chars (str current-stmt c) statements brace-depth false nil)
+            (and in-quotes (= c quote-char))
+            (recur rest-chars (str current-stmt c) statements brace-depth false nil)
 
-          ;; 在引号内，直接添加字符
-          in-quotes
-          (recur rest-chars (str current-stmt c) statements brace-depth in-quotes quote-char)
+            ;; 在引号内，直接添加字符
+            in-quotes
+            (recur rest-chars (str current-stmt c) statements brace-depth in-quotes quote-char)
 
-          ;; 处理花括号
-          (= c \{)
-          (recur rest-chars (str current-stmt c) statements (inc brace-depth) in-quotes quote-char)
+            ;; 处理花括号
+            (= c \{)
+            (recur rest-chars (str current-stmt c) statements (inc brace-depth) in-quotes quote-char)
 
-          (= c \})
-          (recur rest-chars (str current-stmt c) statements (dec brace-depth) in-quotes quote-char)
+            (= c \})
+            (let [new-stmt (str current-stmt c)
+                  new-depth (dec brace-depth)]
+              ;; 如果花括号闭合且深度为0，表示一个完整的块结束
+              (if (= new-depth 0)
+                (recur rest-chars "" (conj statements (str/trim new-stmt)) new-depth in-quotes quote-char)
+                (recur rest-chars new-stmt statements new-depth in-quotes quote-char)))
 
-          ;; 处理分号分隔符（只在花括号外才分割）
-          (and (= c \;) (= brace-depth 0))
-          (recur rest-chars "" (conj statements (str/trim current-stmt)) brace-depth in-quotes quote-char)
+            ;; 处理分号分隔符（只在花括号外才分割）
+            (and (= c \;) (= brace-depth 0))
+            (recur rest-chars "" (conj statements (str/trim current-stmt)) brace-depth in-quotes quote-char)
 
-          ;; 其他字符
-          :else
-          (recur rest-chars (str current-stmt c) statements brace-depth in-quotes quote-char))))))
+            ;; 处理换行符（在花括号外且当前语句不为空时分割）
+            (and (= c \newline) (= brace-depth 0) (not (empty? (str/trim current-stmt))))
+            (recur rest-chars "" (conj statements (str/trim current-stmt)) brace-depth in-quotes quote-char)
+
+            ;; 其他字符
+            :else
+            (recur rest-chars (str current-stmt c) statements brace-depth in-quotes quote-char)))))))
 
 (defn parse-statements
   "解析多个语句"
   [code]
-  (let [statements (split-statements (str/replace code #"\n" " "))]
+  (let [statements (split-statements code)]
     (->> statements
          (filter #(not (empty? %)))
          (mapv parse-statement))))
+
+(defn parse-return
+  "解析返回语句"
+  [return-str]
+  (try
+    (let [return-str (str/trim return-str)
+          return-str (if (str/ends-with? return-str ";")
+                       (subs return-str 0 (dec (count return-str)))
+                       return-str)
+          
+          ;; 移除"返回"关键字
+          value-str (str/trim (subs return-str 2))]
+      
+      (if (empty? value-str)
+        ;; 无参数的返回语句
+        {:type :return
+         :value nil}
+        ;; 有参数的返回语句
+        {:type :return
+         :value (parse-expression value-str)}))
+    
+    (catch Exception e
+      (util/log :error "解析返回语句失败: %s, 错误: %s" return-str (.getMessage e))
+      (util/format-error :parse-error "解析返回语句失败: %s" (.getMessage e)))))
 
 (defn parse-statement
   "解析单个语句"
@@ -200,6 +264,9 @@
 
       (str/starts-with? stmt-str "常量")
       (parse-def-var (str/replace-first stmt-str "常量" "变量"))
+
+      (str/starts-with? stmt-str "返回")
+      (parse-return stmt-str)
 
       (str/starts-with? stmt-str "@")
       (parse-function-call stmt-str)

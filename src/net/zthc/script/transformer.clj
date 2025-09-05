@@ -1,6 +1,7 @@
 (ns net.zthc.script.transformer
   (:require
-   [clojure.string :as str]))
+    [clojure.string :as str]
+    [net.zthc.script.early-return :as ret]))
 
 (declare transform-ast)
 
@@ -48,14 +49,68 @@
         var-value (transform-expression (:value var-def))]
     `(def ~var-name ~var-value)))
 
+(defn optimize-function-body
+  "优化函数体，处理返回语句"
+  [body-forms]
+  (if (empty? body-forms)
+    []
+    (let [last-form (last body-forms)
+          other-forms (butlast body-forms)]
+      ;; 如果最后一个表达式是 (返回 value)，提取其参数
+      (if (and (seq? last-form)
+               (= (first last-form) '返回)
+               (= (count last-form) 2))
+        (concat other-forms [(second last-form)])
+        body-forms))))
+
+(defn has-early-return?
+  "检查函数体是否包含早期返回（非最后位置的返回语句）"
+  [body-forms]
+  (let [non-last-forms (butlast body-forms)]
+    (some (fn [form]
+            (and (seq? form) (= (first form) '返回)))
+          non-last-forms)))
+
+(defn transform-function-body-with-early-return
+  "转换包含早期返回的函数体"
+  [body-forms]
+  (letfn [(transform-form [form]
+            (if (and (seq? form) (= (first form) '返回))
+              (if (= (count form) 1)
+                `(throw (ret/->EarlyReturn nil))
+                `(throw (ret/->EarlyReturn ~(second form))))
+              form))]
+    (map transform-form body-forms)))
+
 (defn transform-function-def
   "转换函数定义"
   [func-def]
   (let [func-name (symbol (:name func-def))
         params (mapv symbol (:params func-def))
-        body (mapv transform-ast (:body func-def))]
-    `(defn ~func-name ~params
-       ~@body)))
+        raw-body (mapv transform-ast (:body func-def))]
+
+    (if (has-early-return? raw-body)
+      ;; 包含早期返回，使用异常机制
+      (let [early-return-body (transform-function-body-with-early-return raw-body)]
+        `(defn ~func-name ~params
+           (try
+             ~@early-return-body
+             (catch clojure.lang.ExceptionInfo e#
+               (if (ret/early-return? e#)
+                 (:value e#)
+                 (throw e#))))))
+      ;; 普通函数，使用优化的函数体
+      (let [optimized-body (optimize-function-body raw-body)]
+        `(defn ~func-name ~params
+           ~@optimized-body)))))
+
+(defn transform-return
+  "转换返回语句"
+  [return-stmt]
+  (let [value (:value return-stmt)]
+    (if (nil? value)
+      (list '返回)
+      (list '返回 (transform-expression value)))))
 
 (defn transform-function-call
   "转换函数调用"
@@ -75,6 +130,10 @@
     ;; 函数定义
     (and (map? ast) (= (:type ast) :function-def))
     (transform-function-def ast)
+
+    ;; 返回语句
+    (and (map? ast) (= (:type ast) :return))
+    (transform-return ast)
 
     ;; 函数调用
     (and (map? ast) (= (:type ast) :function-call))
@@ -127,7 +186,14 @@
   [code-forms]
   (->> code-forms
        (remove nil?)
-       (remove empty?)
+       (remove (fn [form]
+                 (cond
+                   ;; 对于集合类型，检查是否为空
+                   (coll? form) (empty? form)
+                   ;; 对于字符串，检查是否为空或仅包含空白
+                   (string? form) (str/blank? form)
+                   ;; 其他类型不视为"空"
+                   :else false)))
        vec))
 
 (defn format-code-for-display
@@ -141,11 +207,11 @@
   "验证转换结果"
   [original-ast transformed-code]
   (try
-    {:valid true
-     :original-count (if (vector? original-ast) (count original-ast) 1)
+    {:valid             true
+     :original-count    (if (vector? original-ast) (count original-ast) 1)
      :transformed-count (count transformed-code)
-     :message "转换成功"}
+     :message           "转换成功"}
     (catch Exception e
-      {:valid false
-       :error (.getMessage e)
+      {:valid   false
+       :error   (.getMessage e)
        :message "转换验证失败"})))
