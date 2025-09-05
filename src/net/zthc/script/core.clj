@@ -1,41 +1,40 @@
 (ns net.zthc.script.core
-  (:require
-    ;[quil.core :as q]
-    [net.zthc.script.util :as util]
-    [clojure.tools.nrepl.server :refer [start-server stop-server]]
-    [clojure.tools.nrepl.misc :refer [response-for]]
-    [clojure.tools.nrepl.transport :as t])
-  )
+  (:require [net.zthc.script.tcp-server :as tcp]
+            [net.zthc.script.util :as util]
+            [clojure.tools.nrepl.server :as nrepl])
+  (:gen-class))
 
-;(defn setup []
-;  (q/smooth))
-;
-;(defn draw []
-;  (q/background 255)
-;  (q/fill 192)
-;  (q/ellipse 100 100 30 30))
-;
-;(defn draw-ui
-;  []
-;  (q/defsketch example
-;               :title "Example"
-;               :setup setup
-;               :draw draw
-;               :size [200 200])
-;  )
+(defn start-services
+  "启动所有服务"
+  []
+  (println "启动 zthc-script 服务...")
 
-(defn current-time
-  [h]
-  (fn [{:keys [op transport] :as msg}]
-    (if (= "time?" op)
-      (t/send transport (response-for msg :status :done :time (System/currentTimeMillis)))
-      (h msg))))
+  ;; 启动 nREPL 服务器
+  (let [nrepl-port 7889]
+    (println (str "启动 nREPL 服务器在端口 " nrepl-port))
+    (nrepl/start-server :port nrepl-port))
 
-(defonce server (start-server
-                  :port 7888
-                  :handler current-time
-                  ))
+  ;; 启动 TCP 服务器
+  (let [tcp-port 7888]
+    (println (str "启动 TCP 服务器在端口 " tcp-port))
+    (tcp/start-server tcp-port))
 
-(defn -main [& args]
-  (util/log :info "REPL Started! At[%s]" (-> server :server-socket))
-  )
+  (println "所有服务已启动"))
+
+(defn -main
+  "主入口函数"
+  [& args]
+  (util/log :info "zthc-script 启动中...")
+
+  (try
+    (start-services)
+    (util/log :info "zthc-script 已成功启动")
+
+    ;; 保持程序运行
+    (loop []
+      (Thread/sleep 1000)
+      (recur))
+
+    (catch Exception e
+      (util/log :error "启动失败: %s" (.getMessage e))
+      (System/exit 1))))
