@@ -5,4 +5,4 @@ pom.xml.asc
 **/target
 .*
 !.gitignore
-zthc-script.iml
+*.iml
