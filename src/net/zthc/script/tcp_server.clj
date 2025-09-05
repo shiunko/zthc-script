@@ -13,10 +13,15 @@
 
 (defn client-id
   "生成客户端ID"
-  [socket]
-  (str (.getHostString (.getRemoteAddress socket))
-       ":"
-       (.getPort (.getRemoteAddress socket))))
+  [info]
+  (try
+    (if-let [socket (:socket info)]
+      (str (.getHostString (.getRemoteAddress socket))
+           ":"
+           (.getPort (.getRemoteAddress socket)))
+      (str "unknown-" (System/currentTimeMillis)))
+    (catch Exception e
+      (str "client-" (System/currentTimeMillis)))))
 
 (defn broadcast-message
   "广播消息给所有连接的客户端"
@@ -35,7 +40,11 @@
   (try
     (let [response-str (if (string? response)
                          response
-                         (json/write-str response))]
+                         (json/write-str response 
+                                         :value-fn (fn [key value]
+                                                     (cond
+                                                       (instance? sci.lang.Var value) (str value)
+                                                       :else value))))]
       (s/put! stream (str response-str "\n")))
     (catch Exception e
       (util/log :error "发送响应失败: %s" (.getMessage e)))))
@@ -54,6 +63,17 @@
        :error (.getMessage e)
        :message "脚本解析失败"})))
 
+(defn serialize-result
+  "序列化执行结果"
+  [value]
+  (cond
+    (string? value) value
+    (number? value) value
+    (boolean? value) value
+    (nil? value) nil
+    (instance? sci.lang.Var value) (str "function:" (.sym value))
+    :else (str value)))
+
 (defn execute-script
   "执行脚本代码"
   [code]
@@ -61,8 +81,8 @@
     (let [result (executor/execute-script code parser/parse)]
       (if (:success result)
         {:success true
-         :result (:last-result result)
-         :all-results (:results result)
+         :result (serialize-result (:last-result result))
+         :all-results (map serialize-result (:results result))
          :execution-count (:execution-count result)
          :message "脚本执行成功"}
         {:success false
@@ -106,7 +126,10 @@
   "处理客户端命令"
   [stream message client-id]
   (try
-    (let [trimmed-msg (str/trim message)]
+    (let [message-str (if (string? message) 
+                        message 
+                        (String. message "UTF-8"))
+          trimmed-msg (str/trim message-str)]
       (util/log :info "客户端 %s 发送消息: %s" client-id trimmed-msg)
 
       (cond
@@ -161,7 +184,7 @@
 (defn handle-client
   "处理客户端连接"
   [stream info]
-  (let [client-id (client-id (:socket info))]
+  (let [client-id (client-id info)]
     (util/log :info "新客户端连接: %s" client-id)
 
     ;; 添加到连接列表

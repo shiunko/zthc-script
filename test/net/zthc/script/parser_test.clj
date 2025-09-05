@@ -42,6 +42,20 @@
       (is (= "test" (:name result)))
       (is (= [] (:params result))))
     
+    ;; 测试复杂函数定义
+    (let [result (parser/parse-def-function "函数 multiply(x, y) { @返回(@乘(x, y)); }")]
+      (is (= :function-def (:type result)))
+      (is (= "multiply" (:name result)))
+      (is (= ["x" "y"] (:params result)))
+      (is (= 1 (count (:body result)))))
+    
+    ;; 测试多语句函数体
+    (let [result (parser/parse-def-function "函数 greet(name) { @调试输出(\"Hello\", name); @返回(name); }")]
+      (is (= :function-def (:type result)))
+      (is (= "greet" (:name result)))
+      (is (= ["name"] (:params result)))
+      (is (= 2 (count (:body result)))))
+    
     (let [result (parser/parse-def-function "invalid function")]
       (is (contains? result :error-type)))))
 
@@ -70,6 +84,15 @@
       (is (= 2 (count results)))
       (is (= :var-def (:type (first results))))
       (is (= :function-call (:type (second results)))))
+    
+    ;; 测试函数定义和调用
+    (let [code "函数 add(a, b) { @返回(@加(a, b)); }; @调试输出(@add(10, 20));"
+          results (parser/parse-statements code)]
+      (is (= 2 (count results)))
+      (is (= :function-def (:type (first results))))
+      (is (= :function-call (:type (second results))))
+      (is (= "add" (:name (first results))))
+      (is (= "调试输出" (:name (second results)))))
     
     (let [results (parser/parse-statements "")]
       (is (= 0 (count results))))))

@@ -137,14 +137,53 @@
       :else
       (parse-identifier expr-str))))
 
+(defn split-statements
+  "智能分割语句，考虑花括号内的分号"
+  [code]
+  (loop [chars (seq code)
+         current-stmt ""
+         statements []
+         brace-depth 0
+         in-quotes false
+         quote-char nil]
+    (if (empty? chars)
+      (if (not (empty? (str/trim current-stmt)))
+        (conj statements (str/trim current-stmt))
+        statements)
+      (let [c (first chars)
+            rest-chars (rest chars)]
+        (cond
+          ;; 处理引号
+          (and (not in-quotes) (contains? #{\' \" \「 \\} c))
+          (recur rest-chars (str current-stmt c) statements brace-depth true c)
+
+          (and in-quotes (= c quote-char))
+          (recur rest-chars (str current-stmt c) statements brace-depth false nil)
+
+          ;; 在引号内，直接添加字符
+          in-quotes
+          (recur rest-chars (str current-stmt c) statements brace-depth in-quotes quote-char)
+
+          ;; 处理花括号
+          (= c \{)
+          (recur rest-chars (str current-stmt c) statements (inc brace-depth) in-quotes quote-char)
+
+          (= c \})
+          (recur rest-chars (str current-stmt c) statements (dec brace-depth) in-quotes quote-char)
+
+          ;; 处理分号分隔符（只在花括号外才分割）
+          (and (= c \;) (= brace-depth 0))
+          (recur rest-chars "" (conj statements (str/trim current-stmt)) brace-depth in-quotes quote-char)
+
+          ;; 其他字符
+          :else
+          (recur rest-chars (str current-stmt c) statements brace-depth in-quotes quote-char))))))
+
 (defn parse-statements
   "解析多个语句"
   [code]
-  (let [statements (-> code
-                       (str/replace #"\n" " ")
-                       (str/split #";"))]
+  (let [statements (split-statements (str/replace code #"\n" " "))]
     (->> statements
-         (map str/trim)
          (filter #(not (empty? %)))
          (mapv parse-statement))))
 
